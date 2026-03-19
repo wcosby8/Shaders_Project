@@ -60,7 +60,7 @@ Material:
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _SecondTex:
-        m_Texture: {fileID: 0}
+        m_Texture: {fileID: 2800000, guid: 747a962f342104b499ddf43ea87cd203, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     m_Ints: []
@@ -78,6 +78,7 @@ Material:
     - _Parallax: 0.02
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
+    - _Speed: 0.3
     - _SrcBlend: 1
     - _SwirlSpeed: 0.3
     - _SwirlStrength: 4
