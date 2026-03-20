@@ -2,18 +2,10 @@ Shader "Custom/GridSlide"
 {
     Properties
     {
-        // The main texture to display in the sliding grid
-        _MainTex ("Texture", 2D) = "white" {}
-        
-        // How many grid cells across and down (e.g. 4 = 4x4 = 16 tiles)
-        _GridSize ("Grid Size", Float) = 4.0
-        
-        // How fast the grid cycles through its 4 phases (seconds per phase)
-        _PhaseSpeed ("Phase Speed", Float) = 0.7
-        
-        // How far each tile slides during its phase (in UV space, 0-1)
-        // 1.0 = slides exactly one full tile width before snapping back
-        _SlideAmount ("Slide Amount", Float) = 1.0
+        _MainTex ("Texture", 2D) = "white" {} //the image
+        _GridSize ("Grid Size", Float) = 4.0 //how many tiles across, 4 means 4x4
+        _PhaseSpeed ("Phase Speed", Float) = 0.7 //how fast the phases cycle
+        _SlideAmount ("Slide Amount", Float) = 1.0 //how far each tile moves, 1.0 = one full tile
     }
 
     SubShader
@@ -30,123 +22,74 @@ Shader "Custom/GridSlide"
 
             struct appdata
             {
-                float4 vertex : POSITION;   // Vertex position in object space
-                float2 uv : TEXCOORD0;      // UV coordinates for this vertex
+                float4 vertex : POSITION; //vertex position
+                float2 uv : TEXCOORD0; //uv coords
             };
 
             struct v2f
             {
-                float2 uv : TEXCOORD0;       // UV interpolated to this pixel
-                float4 vertex : SV_POSITION; // Final screen position
+                float2 uv : TEXCOORD0; //uv passed to fragment
+                float4 vertex : SV_POSITION; //screen position
             };
 
-            sampler2D _MainTex;
-            float4 _MainTex_ST;
-            float _GridSize;
-            float _PhaseSpeed;
-            float _SlideAmount;
+            sampler2D _MainTex; //the texture sampler
+            float4 _MainTex_ST; //tiling and offset data
+            float _GridSize; //grid size property
+            float _PhaseSpeed; //phase speed property
+            float _SlideAmount; //slide amount property
 
             v2f vert (appdata v)
             {
                 v2f o;
-                o.vertex = UnityObjectToClipPos(v.vertex);
-                o.uv = TRANSFORM_TEX(v.uv, _MainTex);
+                o.vertex = UnityObjectToClipPos(v.vertex); //3d to screen space
+                o.uv = TRANSFORM_TEX(v.uv, _MainTex); //apply tiling/offset
                 return o;
             }
 
-            // -------------------------------------------------------
-            // FRAGMENT SHADER - GRID SLIDE
-            //
-            // KEY CONCEPT - Every tile moves in every phase:
-            // Each tile has a per-tile direction sign based on its grid position.
-            // Horizontal direction alternates by ROW (even rows right, odd left).
-            // Vertical direction alternates by COLUMN (even cols up, odd down).
-            //
-            // KEY CONCEPT - Cumulative displacement across phases:
-            // Rather than each phase independently starting from rest, we track
-            // the tile's TOTAL 2D offset as it accumulates and then returns.
-            // This ensures smooth, continuous motion with no pops at phase seams.
-            //
-            // Phase 0: X slides out  (0 -> displaced),  Y stays 0
-            // Phase 1: X held,                           Y slides out (0 -> displaced)
-            // Phase 2: X returns     (displaced -> 0),   Y held
-            // Phase 3: X stays 0,                        Y returns (displaced -> 0)
-            //
-            // At the end of phase 3 both offsets reach 0, restoring every tile
-            // to its correct position and completing the loop seamlessly.
-            // -------------------------------------------------------
             fixed4 frag (v2f i) : SV_Target
             {
-                // --- DETERMINE WHICH GRID CELL THIS PIXEL BELONGS TO ---
-                // Multiply UV by grid size to "tile" the space (0-1 becomes 0-GridSize)
-                float2 scaledUV = i.uv * _GridSize;
+                float2 scaledUV = i.uv * _GridSize; //scale uv up so each tile is its own 0-1 space
+                float2 cellCoord = floor(scaledUV); //which tile we're in
+                float2 localUV = frac(scaledUV); //position within that tile
 
-                // floor() gives the integer cell index: (0,0) to (GridSize-1, GridSize-1)
-                float2 cellCoord = floor(scaledUV);
+                float phaseTime = _Time.y * _PhaseSpeed; //time scaled to phase speed
+                int phase = (int)fmod(floor(phaseTime), 4.0); //which of the 4 phases we're in
+                float slideT = frac(phaseTime); //0 to 1 progress through current phase
 
-                // frac() gives the local position within the tile (0 to 1)
-                float2 localUV = frac(scaledUV);
+                float dirX = (fmod(cellCoord.y, 2.0) < 1.0) ? 1.0 : -1.0; //even rows go right, odd go left
+                float dirY = (fmod(cellCoord.x, 2.0) < 1.0) ? 1.0 : -1.0; //even cols go up, odd go down
 
-                // --- PHASE AND SLIDE PROGRESS ---
-                float phaseTime = _Time.y * _PhaseSpeed;
-                int phase = (int)fmod(floor(phaseTime), 4.0);
-
-                // slideT ramps smoothly 0->1 over each phase
-                float slideT = frac(phaseTime);
-
-                // --- PER-TILE DIRECTION SIGNS ---
-                // Horizontal: alternates by row  — even rows go right (+1), odd go left (-1)
-                float dirX = (fmod(cellCoord.y, 2.0) < 1.0) ? 1.0 : -1.0;
-
-                // Vertical: alternates by column — even cols go up (+1), odd go down (-1)
-                float dirY = (fmod(cellCoord.x, 2.0) < 1.0) ? 1.0 : -1.0;
-
-                // --- CUMULATIVE DISPLACEMENT ---
-                // Each phase moves one axis while the other is either held or zeroed,
-                // so the total offset returns to (0,0) at the end of the 4-phase cycle.
-                float2 offset = float2(0.0, 0.0);
+                float2 offset = float2(0.0, 0.0); //start with no offset
 
                 if (phase == 0)
                 {
-                    // X slides from 0 to full displacement; Y not yet engaged
-                    offset.x = dirX * slideT * _SlideAmount;
-                    offset.y = 0.0;
+                    offset.x = dirX * slideT * _SlideAmount; //x slides out
+                    offset.y = 0.0; //y not doing anything yet
                 }
                 else if (phase == 1)
                 {
-                    // X held at its full displaced value; Y now slides out
-                    offset.x = dirX * _SlideAmount;
-                    offset.y = dirY * slideT * _SlideAmount;
+                    offset.x = dirX * _SlideAmount; //x stays displaced
+                    offset.y = dirY * slideT * _SlideAmount; //y slides out now
                 }
                 else if (phase == 2)
                 {
-                    // X returns from full displacement back to 0; Y held
-                    offset.x = dirX * (1.0 - slideT) * _SlideAmount;
-                    offset.y = dirY * _SlideAmount;
+                    offset.x = dirX * (1.0 - slideT) * _SlideAmount; //x coming back
+                    offset.y = dirY * _SlideAmount; //y still displaced
                 }
                 else // phase == 3
                 {
-                    // X already at 0; Y returns to 0 — tiles reassemble
-                    offset.x = 0.0;
-                    offset.y = dirY * (1.0 - slideT) * _SlideAmount;
+                    offset.x = 0.0; //x is back home
+                    offset.y = dirY * (1.0 - slideT) * _SlideAmount; //y coming back
                 }
 
-                // --- BUILD FINAL SAMPLE UV ---
-                // Add cell origin + local position + slide offset, then
-                // divide by GridSize to normalize back to 0-1 UV space.
-                // frac() wraps tiles that slide beyond the texture boundary.
-                float2 finalUV = frac((cellCoord + localUV + offset) / _GridSize);
+                float2 finalUV = frac((cellCoord + localUV + offset) / _GridSize); //add offset, wrap, normalize back to 0-1
+                fixed4 col = tex2D(_MainTex, finalUV); //sample the texture
 
-                // Sample the texture at the computed UV position
-                fixed4 col = tex2D(_MainTex, finalUV);
-
-                // --- GRID LINES ---
-                // Darken pixels near tile edges to show the sliding grid structure
-                float lineThickness = 0.03;
+                float lineThickness = 0.03; //how thick the grid lines are
                 if (localUV.x < lineThickness || localUV.x > (1.0 - lineThickness) ||
                     localUV.y < lineThickness || localUV.y > (1.0 - lineThickness))
                 {
-                    col.rgb *= 0.6;
+                    col.rgb *= 0.6; //darken the edges so you can see the grid
                 }
 
                 return col;
