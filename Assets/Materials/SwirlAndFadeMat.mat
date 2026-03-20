@@ -81,7 +81,7 @@ Material:
     - _Speed: 0.3
     - _SrcBlend: 1
     - _SwirlSpeed: 0.3
-    - _SwirlStrength: 4
+    - _SwirlStrength: 15
     - _UVSec: 0
     - _ZWrite: 1
     m_Colors:

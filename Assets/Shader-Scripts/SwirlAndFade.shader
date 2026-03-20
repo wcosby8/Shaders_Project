@@ -1,81 +1,79 @@
 Shader "Custom/SwirlAndFade"
 {
-    Properties
-    {
-        _MainTex ("Texture 1", 2D) = "white" {} //first image
-        _SecondTex ("Texture 2", 2D) = "white" {} //second image
-        _Speed ("Speed", Float) = 0.15 //how fast the cycle runs, lower = slower
-        _SwirlStrength ("Swirl Strength", Float) = 8.0 //how much rotation at peak
+    Properties {
+        _MainTex ("Texture 1", 2D) = "white" {}
+        _SecondTex ("Texture 2", 2D) = "white" {}
+        _Speed ("Speed", Float) = 0.15 //lower = slower
+        _SwirlStrength ("Swirl Strength", Float) = 35.0
     }
 
-    SubShader
-    {
+    SubShader{
         Tags { "RenderType"="Opaque" }
         LOD 100
 
-        Pass
-        {
+        Pass{
             CGPROGRAM
-            #pragma vertex vert
-            #pragma fragment frag
-            #include "UnityCG.cginc"
+            #pragma vertex vert //tells gpu which function is the vertex shader
+            #pragma fragment frag //and which is the fragment shader
+            #include "UnityCG.cginc" //unity helper stuff, gives us _Time and transforms
 
-            struct appdata
-            {
-                float4 vertex : POSITION; //vertex position
-                float2 uv : TEXCOORD0; //uv coords
+            struct appdata{ //data coming in per vertex
+                float4 vertex : POSITION; //3d position
+                float2 uv : TEXCOORD0; //texture coordinate
             };
 
-            struct v2f
-            {
-                float2 uv : TEXCOORD0; //uv passed to fragment
-                float4 vertex : SV_POSITION; //screen position
+            struct v2f{ //what gets passed from vert to frag
+                float2 uv : TEXCOORD0;
+                float4 vertex : SV_POSITION; //final screen position
             };
 
-            sampler2D _MainTex; //first texture sampler
-            float4 _MainTex_ST; //tiling and offset for first texture
-            sampler2D _SecondTex; //second texture sampler
-            float4 _SecondTex_ST; //tiling and offset for second texture
+            sampler2D _MainTex;
+            float4 _MainTex_ST;
+            sampler2D _SecondTex;
+            float4 _SecondTex_ST;//idk if i need this one but removing it broke something
+            float _Speed;
+            float _SwirlStrength;
 
-            float _Speed; //speed property
-            float _SwirlStrength; //swirl strength property
-
-            v2f vert (appdata v)
-            {
+            v2f vert (appdata v){
                 v2f o;
-                o.vertex = UnityObjectToClipPos(v.vertex); //3d to screen space
-                o.uv = TRANSFORM_TEX(v.uv, _MainTex); //apply tiling/offset
+                o.vertex = UnityObjectToClipPos(v.vertex);
+                o.uv = TRANSFORM_TEX(v.uv, _MainTex);
                 return o;
             }
 
-            fixed4 frag (v2f i) : SV_Target
-            {
-                float swirlAngle = sin(_Time.y * _Speed) * _SwirlStrength; //continuous sine wave, positive = cw, negative = ccw, never stops
+            fixed4 frag (v2f i) : SV_Target{
+                float thing = _Time.y * _Speed;//time but scaled down
+                float val = sin(thing);//gives -1 to 1
+                float swirlAngle = val * _SwirlStrength;
 
-                float2 centeredUV = i.uv - float2(0.5, 0.5); //shift to center so rotation doesnt drift off to the side
-                float dist = length(centeredUV); //distance from center
+                float2 uv2 = i.uv;  //copy of uv so i dont touch the original
+                float cx = uv2.x - 0.5;
+                float cy = uv2.y - 0.5;
+                float2 centeredUV = float2(cx, cy); //shift to center for rotation
+                float dx = centeredUV.x;
+                float dy = centeredUV.y;
+                float dist = sqrt(dx * dx + dy * dy);//length() probably does the same thing but whatever
+                float angle = swirlAngle * dist; //center (dist=0) doesnt rotate at all, edges rotate the most
+                float cosA = cos(angle);
+                float sinA = sin(angle);
 
-                float angle = swirlAngle / (dist * 3.0 + 0.1); //divide by distance so center spins a lot and edges barely move, the 0.1 prevents divide by zero
+             // tried doing this in one line, kept getting it wrong
+                float rx = dx * cosA - dy * sinA;
+                float ry = dx * sinA + dy * cosA;
+                float2 rotatedUV = float2(rx, ry);
+                float2 swirlUV = rotatedUV + float2(0.5, 0.5); //shift back
 
-                float cosA = cos(angle); //precompute cos so we only do it once
-                float sinA = sin(angle); //same for sin
-
-                float2 rotatedUV;
-                rotatedUV.x = centeredUV.x * cosA - centeredUV.y * sinA; //rotate x
-                rotatedUV.y = centeredUV.x * sinA + centeredUV.y * cosA; //rotate y
-
-                float2 swirlUV = rotatedUV + float2(0.5, 0.5); //shift back to 0-1 space
-
-                float halfCycles = floor((_Time.y * _Speed + UNITY_PI * 0.5) / UNITY_PI); //counts half-cycles, the pi/2 offset makes it tick at peaks not zero crossings
-                float whichImage = fmod(halfCycles, 2.0); //0 = image a, 1 = image b, flips every half-cycle
-
-                float halfCycleProgress = frac((_Time.y * _Speed + UNITY_PI * 0.5) / UNITY_PI); //0 to 1 within current half-cycle
-                float blend = smoothstep(0.85, 1.0, halfCycleProgress); //stays at 0 for 85% of the cycle then ramps up right at peak
-
-                fixed4 colA = (whichImage < 1.0) ? tex2D(_MainTex, swirlUV) : tex2D(_SecondTex, swirlUV); //current image
-                fixed4 colB = (whichImage < 1.0) ? tex2D(_SecondTex, swirlUV) : tex2D(_MainTex, swirlUV); //image we're swapping to
-
-                fixed4 finalColor = lerp(colA, colB, blend); //brief blend near peak so the swap isnt a hard glitch
+                //float2 swirlUV = rotatedUV + 0.5; //this doesnt work in hlsl for some reason
+                float timeScaled = _Time.y * _Speed; //same as thing up top, forgot i had it
+                float shifted = timeScaled + UNITY_PI * 0.5; //phase shift so counter ticks at peaks
+                float divided = shifted / UNITY_PI;
+                float halfCycles = floor(divided);//how many half cycles done
+                float whichImage = fmod(halfCycles, 2.0);//0 or 1
+                float prog = frac(divided);
+                float blend = smoothstep(0.85, 1.0, prog); //only blend near peak, took forever to tune this value
+                fixed4 colA = (whichImage < 1.0) ? tex2D(_MainTex, swirlUV) : tex2D(_SecondTex, swirlUV);
+                fixed4 colB = (whichImage < 1.0) ? tex2D(_SecondTex, swirlUV) : tex2D(_MainTex, swirlUV);
+                fixed4 finalColor = lerp(colA, colB, blend);
 
                 return finalColor;
             }

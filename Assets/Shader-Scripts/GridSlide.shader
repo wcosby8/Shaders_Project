@@ -1,95 +1,102 @@
-Shader "Custom/GridSlide"
-{
-    Properties
-    {
-        _MainTex ("Texture", 2D) = "white" {} //the image
-        _GridSize ("Grid Size", Float) = 4.0 //how many tiles across, 4 means 4x4
-        _PhaseSpeed ("Phase Speed", Float) = 0.7 //how fast the phases cycle
-        _SlideAmount ("Slide Amount", Float) = 1.0 //how far each tile moves, 1.0 = one full tile
+Shader "Custom/GridSlide"{
+    Properties{
+        _MainTex ("Texture", 2D) = "white" {}
+        _GridSize ("Grid Size", Float) = 4.0 //4 = 4x4 grid
+        _PhaseSpeed ("Phase Speed", Float) = 0.7
+        _SlideAmount ("Slide Amount", Float) = 1.0 //1.0 = slides exactly one tile
     }
 
-    SubShader
-    {
-        Tags { "RenderType"="Opaque" }
+    SubShader{
+        Tags { 
+            "RenderType"="Opaque" 
+        }
         LOD 100
 
-        Pass
-        {
+        Pass{
             CGPROGRAM
-            #pragma vertex vert
-            #pragma fragment frag
-            #include "UnityCG.cginc"
-
-            struct appdata
-            {
-                float4 vertex : POSITION; //vertex position
-                float2 uv : TEXCOORD0; //uv coords
+            #pragma vertex vert //vertex shader
+            #pragma fragment frag //fragment shader
+            #include "UnityCG.cginc" //gives us _Time, transforms, etc
+            struct appdata{ //per vertex input
+                float4 vertex : POSITION; //3d position
+                float2 uv : TEXCOORD0;
             };
 
-            struct v2f
-            {
-                float2 uv : TEXCOORD0; //uv passed to fragment
-                float4 vertex : SV_POSITION; //screen position
+            struct v2f{ //passed from vert to frag
+    
+                float2 uv : TEXCOORD0;
+                float4 vertex : SV_POSITION; //screen space position
             };
 
-            sampler2D _MainTex; //the texture sampler
-            float4 _MainTex_ST; //tiling and offset data
-            float _GridSize; //grid size property
-            float _PhaseSpeed; //phase speed property
-            float _SlideAmount; //slide amount property
+            sampler2D _MainTex;
+            float4 _MainTex_ST;
+            float _GridSize;
+            float _PhaseSpeed;
+            float _SlideAmount;
 
-            v2f vert (appdata v)
-            {
+            v2f vert (appdata v){
                 v2f o;
-                o.vertex = UnityObjectToClipPos(v.vertex); //3d to screen space
-                o.uv = TRANSFORM_TEX(v.uv, _MainTex); //apply tiling/offset
+                o.vertex = UnityObjectToClipPos(v.vertex);
+                o.uv = TRANSFORM_TEX(v.uv, _MainTex);
                 return o;
             }
 
-            fixed4 frag (v2f i) : SV_Target
-            {
-                float2 scaledUV = i.uv * _GridSize; //scale uv up so each tile is its own 0-1 space
-                float2 cellCoord = floor(scaledUV); //which tile we're in
-                float2 localUV = frac(scaledUV); //position within that tile
+            fixed4 frag (v2f i) : SV_Target{
+                float2 scaled = i.uv * _GridSize;//scale up so we can work in tile space
+                float cx = floor(scaled.x); //tile column
+                float cy = floor(scaled.y); //tile row
+                float2 cellCoord = float2(cx, cy);
+                float lx = frac(scaled.x); //position within tile 0-1
+                float ly = frac(scaled.y);
+                float2 localUV = float2(lx, ly);
+                float pt = _Time.y * _PhaseSpeed;
+                float phaseRaw = fmod(floor(pt), 4.0);//0 1 2 3 then repeats
+                int phase = (int)phaseRaw;
+                float slideT = frac(pt);  //progress within current phase
+                float rowCheck = fmod(cy, 2.0);
+                float dirX = (rowCheck < 1.0) ? 1.0 : -1.0;//alternates per row
+                float colCheck = fmod(cx, 2.0);
+                float dirY = (colCheck < 1.0) ? 1.0 : -1.0; //alternates per column
+                float ox = 0.0;
+                float oy = 0.0;
 
-                float phaseTime = _Time.y * _PhaseSpeed; //time scaled to phase speed
-                int phase = (int)fmod(floor(phaseTime), 4.0); //which of the 4 phases we're in
-                float slideT = frac(phaseTime); //0 to 1 progress through current phase
-
-                float dirX = (fmod(cellCoord.y, 2.0) < 1.0) ? 1.0 : -1.0; //even rows go right, odd go left
-                float dirY = (fmod(cellCoord.x, 2.0) < 1.0) ? 1.0 : -1.0; //even cols go up, odd go down
-
-                float2 offset = float2(0.0, 0.0); //start with no offset
-
-                if (phase == 0)
-                {
-                    offset.x = dirX * slideT * _SlideAmount; //x slides out
-                    offset.y = 0.0; //y not doing anything yet
+                if(phase == 0){
+                    ox = dirX * slideT * _SlideAmount; //slides out horizontally
+                    oy = 0.0;
                 }
-                else if (phase == 1)
-                {
-                    offset.x = dirX * _SlideAmount; //x stays displaced
-                    offset.y = dirY * slideT * _SlideAmount; //y slides out now
+                else if(phase == 1){
+                    ox = dirX * _SlideAmount; //x stays put
+                    oy = dirY * slideT * _SlideAmount;//now y slides out
                 }
-                else if (phase == 2)
-                {
-                    offset.x = dirX * (1.0 - slideT) * _SlideAmount; //x coming back
-                    offset.y = dirY * _SlideAmount; //y still displaced
+                else if (phase == 2){
+                    float returning = 1.0 - slideT; //flip it so it goes back
+                    ox = dirX * returning * _SlideAmount;
+                    oy = dirY * _SlideAmount; //y still held
                 }
-                else // phase == 3
-                {
-                    offset.x = 0.0; //x is back home
-                    offset.y = dirY * (1.0 - slideT) * _SlideAmount; //y coming back
+                else{
+                //phase 3, everything coming home
+                    float returning = 1.0 - slideT;
+                    ox = 0.0;
+                    oy = dirY * returning * _SlideAmount;
                 }
 
-                float2 finalUV = frac((cellCoord + localUV + offset) / _GridSize); //add offset, wrap, normalize back to 0-1
-                fixed4 col = tex2D(_MainTex, finalUV); //sample the texture
+                float2 offset = float2(ox, oy);
+                float2 combined = cellCoord + localUV + offset;
+                float2 normalized = combined / _GridSize;  //back to 0-1 range
+                float2 finalUV = frac(normalized);//wrap edges
 
-                float lineThickness = 0.03; //how thick the grid lines are
-                if (localUV.x < lineThickness || localUV.x > (1.0 - lineThickness) ||
-                    localUV.y < lineThickness || localUV.y > (1.0 - lineThickness))
-                {
-                    col.rgb *= 0.6; //darken the edges so you can see the grid
+                 //float2 finalUV = (cellCoord + localUV + offset) / _GridSize; //this version doesnt wrap correctly
+
+                fixed4 col = tex2D(_MainTex, finalUV);
+
+                float thick = 0.03;
+                float edgeLeft = lx;
+                float edgeRight = 1.0 - lx;
+                float edgeBottom = ly;
+                float edgeTop = 1.0 - ly;
+
+                if(edgeLeft < thick || edgeRight < thick || edgeBottom < thick || edgeTop < thick){
+                    col.rgb *= 0.6; //darken borders
                 }
 
                 return col;
